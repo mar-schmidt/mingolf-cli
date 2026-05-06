@@ -90,6 +90,86 @@ Resolution order for ids:
 2. env var (`MINGOLF_CLUB_ID`, `MINGOLF_COURSE_ID`)
 3. usage error
 
+## Secure password storage by platform
+
+Use this when CLI workflows need a password without hardcoding secrets in
+scripts.
+
+### macOS (Keychain via osascript)
+
+Create a keychain item once:
+
+```bash
+security add-generic-password \
+  -a "$USER" \
+  -s "mingolf-cli-password" \
+  -w "<your-password>" \
+  -U
+```
+
+Read the password at runtime:
+
+```bash
+MINGOLF_PASSWORD="$(
+  osascript \
+    -e 'tell application "System Events"' \
+    -e 'get password of generic keychain item "mingolf-cli-password"' \
+    -e 'end tell'
+)"
+```
+
+### Windows (Credential Manager)
+
+Store credentials once in PowerShell:
+
+```powershell
+cmdkey /generic:mingolf-cli `
+  /user:your-username `
+  /pass:your-password
+```
+
+Read credentials at runtime (CredentialManager module):
+
+```powershell
+$cred = Get-StoredCredential -Target "mingolf-cli"
+$env:MINGOLF_USERNAME = $cred.UserName
+$env:MINGOLF_PASSWORD = $cred.GetNetworkCredential().Password
+```
+
+### Linux (libsecret via secret-tool)
+
+Store password once:
+
+```bash
+printf '%s' "<your-password>" | \
+  secret-tool store --label="mingolf-cli password" \
+  service mingolf-cli account "$USER"
+```
+
+Read password at runtime:
+
+```bash
+MINGOLF_PASSWORD="$(
+  secret-tool lookup service mingolf-cli account "$USER"
+)"
+```
+
+Recommended automation pattern:
+
+```bash
+# Use interactive login if no password flag is available in your version.
+mingolf auth login
+unset MINGOLF_PASSWORD
+```
+
+Notes:
+
+- macOS may prompt for Keychain access on first use.
+- Windows example requires the CredentialManager PowerShell module.
+- Linux example requires `libsecret` tools (`secret-tool`).
+- Prefer `"$()"` command substitution to preserve special characters.
+- Avoid echoing passwords or storing them in shell history.
+
 ## Commands reference
 
 ### Auth

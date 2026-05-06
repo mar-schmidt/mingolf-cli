@@ -44,3 +44,40 @@ mingolf bookings create \
 ```
 
 `--tee` accepts either tee id or tee name.
+
+## Cross-platform secure password retrieval
+
+Use OS credential stores instead of plaintext env vars.
+
+macOS:
+
+```bash
+MINGOLF_PASSWORD="$(
+  osascript \
+    -e 'tell application "System Events"' \
+    -e 'get password of generic keychain item "mingolf-cli-password"' \
+    -e 'end tell'
+)"
+mingolf auth login
+unset MINGOLF_PASSWORD
+```
+
+Windows PowerShell:
+
+```powershell
+$cred = Get-StoredCredential -Target "mingolf-cli"
+$env:MINGOLF_USERNAME = $cred.UserName
+$env:MINGOLF_PASSWORD = $cred.GetNetworkCredential().Password
+mingolf auth login
+Remove-Item Env:\MINGOLF_PASSWORD
+```
+
+Linux:
+
+```bash
+MINGOLF_PASSWORD="$(
+  secret-tool lookup service mingolf-cli account "$USER"
+)"
+mingolf auth login
+unset MINGOLF_PASSWORD
+```
