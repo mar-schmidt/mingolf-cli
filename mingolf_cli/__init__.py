@@ -1,0 +1,1 @@
+"""mingolf CLI package."""
