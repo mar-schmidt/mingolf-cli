@@ -57,7 +57,7 @@ def build_manifest(frontmatter: dict) -> dict:
         "schemaVersion": "1",
         "description": frontmatter["description"],
         "source": (
-            "https://raw.githubusercontent.com/marcus/mingolf-cli/main/"
+            "https://raw.githubusercontent.com/mar-schmidt/mingolf-cli/master/"
             ".agent/SKILL.md"
         ),
         "install": frontmatter.get("install", {}),

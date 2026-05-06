@@ -5,11 +5,11 @@ description: >
   Use the Mingolf CLI to authenticate and manage Swedish golf tee times.
   Trigger this skill when the user mentions mingolf, golf bookings, tee-times,
   slotId, courseId, clubId, or start-time scheduling workflows.
-author: marcus
-repo: https://github.com/marcus/mingolf-cli
+author: mar-schmidt
+repo: https://github.com/mar-schmidt/mingolf-cli
 install:
-  pip: pip install mingolf-cli
-  pipx: pipx install mingolf-cli
+  pip: pip install "git+https://github.com/mar-schmidt/mingolf-cli.git"
+  pipx: pipx install "git+https://github.com/mar-schmidt/mingolf-cli.git"
 requires:
   - python: ">=3.11"
 compatibility:
@@ -44,14 +44,14 @@ cancel.
 ## Installation
 
 ```bash
-pip install mingolf-cli
+pip install "git+https://github.com/mar-schmidt/mingolf-cli.git"
 mingolf --help
 ```
 
 Optional:
 
 ```bash
-pipx install mingolf-cli
+pipx install "git+https://github.com/mar-schmidt/mingolf-cli.git"
 mingolf --help
 ```
 
