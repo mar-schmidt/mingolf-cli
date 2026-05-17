@@ -59,6 +59,20 @@ def list_clubs(client: MingolfHttpClient) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
+def search_players(
+    client: MingolfHttpClient,
+    *,
+    search_phrase: str,
+    country: str,
+) -> list[dict[str, Any]]:
+    data = client.request_json(
+        "GET",
+        "/bokning/api/Persons",
+        params={"SearchPhrase": search_phrase, "Country": country},
+    )
+    return data if isinstance(data, list) else []
+
+
 def get_course_schedule(
     client: MingolfHttpClient,
     *,

@@ -45,6 +45,19 @@ mingolf bookings create \
 
 `--tee` accepts either tee id or tee name.
 
+## Multi-player booking with companion lookup
+
+```bash
+FRIEND_GOLF_ID="840225-034"
+mingolf players search --search "$FRIEND_GOLF_ID" --country Sweden
+mingolf bookings create \
+  --slot 724854b6-b739-4886-b9e1-a545103763a1 \
+  --companion-golf-id "$FRIEND_GOLF_ID" \
+  --country Sweden
+```
+
+Use repeated `--companion-golf-id` flags to add more players.
+
 ## Cross-platform secure password retrieval
 
 Use OS credential stores instead of plaintext env vars.

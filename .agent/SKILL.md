@@ -194,6 +194,8 @@ mingolf clubs
 mingolf clubs --search "chalmers"
 mingolf courses --club <clubId>
 mingolf tee-times --club <clubId> --course <courseId> --date 2026-05-08
+mingolf players search --search <golfId>
+mingolf players search --search <golfId> --country Sweden
 ```
 
 ### Bookings
@@ -202,6 +204,12 @@ mingolf tee-times --club <clubId> --course <courseId> --date 2026-05-08
 mingolf bookings list
 mingolf bookings create --slot <slotId>
 mingolf bookings create --slot <slotId> --tee <teeId-or-teeName>
+mingolf bookings create --slot <slotId> --companion-golf-id <golfId>
+mingolf bookings create \
+  --slot <slotId> \
+  --companion-golf-id <golfId> \
+  --companion-golf-id <golfId> \
+  --country Sweden
 mingolf bookings cancel --booking <bookingId>
 ```
 
@@ -219,8 +227,10 @@ mingolf bookings cancel --booking <bookingId>
 2. Run `mingolf courses --club <clubId>` and pick `courseId`.
 3. Run `mingolf tee-times --club <clubId> --course <courseId> --date <date>`.
 4. Pick `slotId` from `slots[].slotId`.
-5. Run `mingolf bookings create --slot <slotId>`.
-6. Save returned `bookings[0].bookingId`.
+5. Optional: run `mingolf players search --search <golfId>`.
+6. Run `mingolf bookings create --slot <slotId>`.
+7. For multi-player rounds, add one or more `--companion-golf-id`.
+8. Save returned `bookings[0].bookingId`.
 
 ### Workflow: list and cancel
 
@@ -239,6 +249,8 @@ mingolf bookings cancel --booking <bookingId>
 | `auth_required` | expired or missing session | run `mingolf auth login` |
 | `booking_validation_failed` | API validation errors | inspect |
 |  |  | `details.errors`, choose new slot |
+| `player_not_found` | lookup missed a companion golf id | verify |
+|  |  | `--companion-golf-id` and `--country` |
 | `missing_tee_options` | upstream tee lookup failed | retry or |
 |  |  | try another slot |
 | `network_timeout` | upstream timeout | retry command |
@@ -247,6 +259,7 @@ mingolf bookings cancel --booking <bookingId>
 ## What NOT to do
 
 - Do not call `bookings create` without `slotId` from `tee-times`.
+- Do not pass `--companion-golf-id` without first checking player identity.
 - Do not assume a club name can be used where `clubId` is required.
 - Do not assume a course name can be used where `courseId` is required.
 - Do not parse human text when JSON fields are available.
@@ -259,4 +272,5 @@ mingolf bookings cancel --booking <bookingId>
 
 ## Changelog
 
+- `1.1.0`: Added companion bookings and player search workflow.
 - `1.0.0`: Initial Mingolf skill release.

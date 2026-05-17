@@ -28,6 +28,7 @@ COMMANDS = [
     "clubs",
     "courses",
     "tee-times",
+    "players search",
     "bookings list",
     "bookings create",
     "bookings cancel",

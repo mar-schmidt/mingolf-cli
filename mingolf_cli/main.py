@@ -8,6 +8,7 @@ from mingolf_cli.client.auth import load_auth_state
 from mingolf_cli.client.http import MingolfHttpClient
 from mingolf_cli.commands.auth import app as auth_app
 from mingolf_cli.commands.booking import app as root_app
+from mingolf_cli.commands.players import app as players_app
 from mingolf_cli.commands.profile import app as profile_app
 from mingolf_cli.config import get_app_paths
 from mingolf_cli.runtime import Runtime
@@ -15,6 +16,7 @@ from mingolf_cli.runtime import Runtime
 app = root_app
 app.pretty_exceptions_enable = False
 app.add_typer(auth_app, name="auth")
+app.add_typer(players_app, name="players")
 app.add_typer(profile_app, name="profile")
 
 

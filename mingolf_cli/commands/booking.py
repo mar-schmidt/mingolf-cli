@@ -19,6 +19,7 @@ from mingolf_cli.client.booking import (
     list_club_courses,
     list_clubs,
     lock_slot,
+    search_players,
     unlock_slot,
     validate_booking,
 )
@@ -219,10 +220,11 @@ def _player_from_profile(profile: dict[str, Any]) -> BookingPlayer:
 def _build_payload(
     player: BookingPlayer,
     slot_booking_id: str,
+    created_number: int,
 ) -> dict[str, Any]:
     return {
         "slotBookingId": slot_booking_id,
-        "createdNumber": 1,
+        "createdNumber": created_number,
         "state": "Added",
         "hasArrived": False,
         "hasBeenValidated": False,
@@ -231,11 +233,150 @@ def _build_payload(
     }
 
 
+def _split_name(full_name: str) -> tuple[str, str]:
+    cleaned = full_name.strip()
+    if not cleaned:
+        return "", ""
+    parts = cleaned.split()
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+def _player_from_lookup(
+    data: dict[str, Any],
+    *,
+    golf_id: str,
+) -> BookingPlayer:
+    first_name = str(data.get("firstName") or "")
+    last_name = str(data.get("lastName") or "")
+    if not first_name and not last_name:
+        first_name, last_name = _split_name(str(data.get("name") or ""))
+    return BookingPlayer(
+        person_id=str(data.get("personId") or data.get("id") or ""),
+        golf_id=str(data.get("golfId") or golf_id),
+        first_name=first_name,
+        last_name=last_name,
+        gender=str(data.get("gender") or ""),
+        age=int(data.get("age") or 0),
+        hcp=str(data.get("hcp") or data.get("handicap") or ""),
+        home_club=str(data.get("homeClub") or data.get("homeClubName") or ""),
+        is_booker=False,
+        is_guest=bool(data.get("isGuest") or False),
+    )
+
+
+def _resolve_companion_player(
+    ctx: typer.Context,
+    golf_id: str,
+    country: str,
+) -> BookingPlayer:
+    runtime = get_runtime(ctx)
+    people = search_players(
+        runtime.client,
+        search_phrase=golf_id,
+        country=country,
+    )
+    for person in people:
+        if str(person.get("golfId") or "") != golf_id:
+            continue
+        return _player_from_lookup(person, golf_id=golf_id)
+    raise CliError(
+        error="Player not found",
+        code="player_not_found",
+        exit_code=exit_codes.USAGE,
+        details={"golfId": golf_id, "country": country},
+    )
+
+
+def _set_validated(payload: list[dict[str, Any]]) -> None:
+    for entry in payload:
+        entry["hasBeenValidated"] = True
+
+
+def _select_tee(
+    tees: list[dict[str, Any]],
+    requested_tee: str | None,
+) -> dict[str, Any] | None:
+    selected = None
+    if requested_tee:
+        for candidate in tees:
+            if requested_tee in (
+                candidate.get("teeId"),
+                candidate.get("teeName"),
+            ):
+                selected = candidate
+                break
+    if selected is None:
+        for candidate in tees:
+            if candidate.get("isDefault"):
+                selected = candidate
+                break
+    if selected is None and tees:
+        selected = tees[0]
+    return selected
+
+
+def _apply_tee_choices(
+    payload: list[dict[str, Any]],
+    handicap_data: list[dict[str, Any]],
+    requested_tee: str | None,
+    slot_id: str,
+) -> list[dict[str, Any]]:
+    if len(handicap_data) < len(payload):
+        raise CliError(
+            error="Missing tee options",
+            code="missing_tee_options",
+            exit_code=exit_codes.UPSTREAM,
+            details={
+                "slotId": slot_id,
+                "expectedPlayers": len(payload),
+                "receivedPlayers": len(handicap_data),
+            },
+        )
+    selected_tees = []
+    for index, entry in enumerate(payload):
+        tee_options = handicap_data[index].get("tees") or []
+        if not isinstance(tee_options, list):
+            tee_options = []
+        selected = _select_tee(tee_options, requested_tee)
+        if selected is None:
+            raise CliError(
+                error="No usable tee found",
+                code="no_usable_tee",
+                exit_code=exit_codes.USAGE,
+                details={
+                    "slotId": slot_id,
+                    "requestedTee": requested_tee,
+                    "golfId": entry.get("player", {}).get("golfId"),
+                },
+            )
+        tee_payload = {
+            "teeId": selected.get("teeId"),
+            "teeName": selected.get("teeName"),
+            "playingHandicap": selected.get("playingHandicap"),
+            "saveAsDefault": False,
+        }
+        entry["player"]["tee"] = tee_payload
+        selected_tees.append(
+            {
+                "golfId": entry.get("player", {}).get("golfId"),
+                "tee": tee_payload,
+            }
+        )
+    return selected_tees
+
+
 @bookings_app.command("create")
 def bookings_create(
     ctx: typer.Context,
     slot: str = typer.Option(..., "--slot"),
     tee: str | None = typer.Option(None, "--tee"),
+    companion_golf_id: list[str] = typer.Option(
+        None,
+        "--companion-golf-id",
+    ),
+    country: str = typer.Option("Sweden", "--country"),
 ) -> None:
     """Create a booking from a slot id."""
 
@@ -243,10 +384,16 @@ def bookings_create(
         runtime = get_runtime(ctx)
         _, profile = ensure_authenticated(runtime.client, runtime.paths)
 
-        player = _player_from_profile(profile)
-        slot_booking_id = generate_slot_booking_id()
-        entry = _build_payload(player, slot_booking_id)
-        payload = [entry]
+        booker = _player_from_profile(profile)
+        slot_booking_ids = [generate_slot_booking_id()]
+        payload = [
+            _build_payload(
+                booker,
+                slot_booking_ids[0],
+                created_number=1,
+            )
+        ]
+        selected_tees = []
         slot_locked = False
         try:
             lock_slot(runtime.client, slot)
@@ -266,51 +413,63 @@ def bookings_create(
                     details={"slotId": slot, "errors": errors},
                 )
 
-            payload[0]["hasBeenValidated"] = True
+            _set_validated(payload)
             handicap_data = get_playing_handicaps(
                 runtime.client,
                 slot_id=slot,
                 payload=payload,
             )
-            if not handicap_data:
-                raise CliError(
-                    error="Missing tee options",
-                    code="missing_tee_options",
-                    exit_code=exit_codes.UPSTREAM,
-                    details={"slotId": slot},
+            selected_tees = _apply_tee_choices(
+                payload=payload,
+                handicap_data=handicap_data,
+                requested_tee=tee,
+                slot_id=slot,
+            )
+
+            companion_ids = companion_golf_id or []
+            companions = [
+                _resolve_companion_player(ctx, golf_id=value, country=country)
+                for value in companion_ids
+            ]
+            if companions:
+                for index, companion in enumerate(companions, start=2):
+                    generated_id = generate_slot_booking_id()
+                    slot_booking_ids.append(generated_id)
+                    payload.append(
+                        _build_payload(
+                            companion,
+                            generated_id,
+                            created_number=index,
+                        )
+                    )
+
+                validation = validate_booking(
+                    runtime.client,
+                    slot_id=slot,
+                    payload=payload,
+                )
+                errors = validation.get("errors") or []
+                if errors:
+                    raise CliError(
+                        error="Booking validation failed",
+                        code="booking_validation_failed",
+                        exit_code=exit_codes.USAGE,
+                        details={"slotId": slot, "errors": errors},
+                    )
+
+                _set_validated(payload)
+                handicap_data = get_playing_handicaps(
+                    runtime.client,
+                    slot_id=slot,
+                    payload=payload,
+                )
+                selected_tees = _apply_tee_choices(
+                    payload=payload,
+                    handicap_data=handicap_data,
+                    requested_tee=tee,
+                    slot_id=slot,
                 )
 
-            tees = handicap_data[0].get("tees") or []
-            selected = None
-            if tee:
-                for candidate in tees:
-                    if tee in (
-                        candidate.get("teeId"),
-                        candidate.get("teeName"),
-                    ):
-                        selected = candidate
-                        break
-            if selected is None:
-                for candidate in tees:
-                    if candidate.get("isDefault"):
-                        selected = candidate
-                        break
-            if selected is None and tees:
-                selected = tees[0]
-            if selected is None:
-                raise CliError(
-                    error="No usable tee found",
-                    code="no_usable_tee",
-                    exit_code=exit_codes.USAGE,
-                    details={"slotId": slot, "requestedTee": tee},
-                )
-
-            payload[0]["player"]["tee"] = {
-                "teeId": selected.get("teeId"),
-                "teeName": selected.get("teeName"),
-                "playingHandicap": selected.get("playingHandicap"),
-                "saveAsDefault": False,
-            }
             created = create_booking(
                 runtime.client,
                 slot_id=slot,
@@ -321,8 +480,11 @@ def bookings_create(
             return {
                 "ok": True,
                 "slotId": slot,
-                "slotBookingId": slot_booking_id,
-                "selectedTee": payload[0]["player"]["tee"],
+                "slotBookingId": slot_booking_ids[0],
+                "slotBookingIds": slot_booking_ids,
+                "selectedTee": selected_tees[0]["tee"],
+                "selectedTees": selected_tees,
+                "playerCount": len(payload),
                 "bookings": created,
             }
         except Exception:

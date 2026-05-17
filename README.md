@@ -55,7 +55,9 @@ Discover and book:
 mingolf clubs --search "club name"
 mingolf courses --club <clubId>
 mingolf tee-times --club <clubId> --course <courseId> --date 2026-05-08
+mingolf players search --search <golfId>
 mingolf bookings create --slot <slotId>
+mingolf bookings create --slot <slotId> --companion-golf-id <golfId>
 ```
 
 List and cancel:
@@ -84,9 +86,11 @@ Secondary path: use the source skill files in `.agent/`.
 Canonical skill source URLs:
 
 - latest:
-  `https://raw.githubusercontent.com/mar-schmidt/mingolf-cli/main/.agent/SKILL.md`
+  `https://raw.githubusercontent.com/mar-schmidt/mingolf-cli/main/`
+  `.agent/SKILL.md`
 - pinned:
-  `https://raw.githubusercontent.com/mar-schmidt/mingolf-cli/vX.Y.Z/.agent/SKILL.md`
+  `https://raw.githubusercontent.com/mar-schmidt/mingolf-cli/vX.Y.Z/`
+  `.agent/SKILL.md`
 
 Manual local install from source:
 

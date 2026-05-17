@@ -1,8 +1,8 @@
 # Mingolf API notes for CLI usage
 
 This document summarizes the Mingolf API used by mingolf.golf.se.
-It is also used by `mingolf-cli` which focuses on practical flows and minimum fields needed for
-automation.
+It is also used by `mingolf-cli` which focuses on practical flows and minimum
+fields needed for automation.
 
 Base URL:
 
@@ -79,7 +79,8 @@ Required sequence:
 1. lock slot
 2. validate payload
 3. fetch tee options
-4. create booking
+4. optionally add players and validate again
+5. create booking
 
 ### Lock
 
@@ -102,6 +103,20 @@ Required sequence:
 
 - `POST /bokning/api/Slot/{slotId}/Bookings`
 - returns booking data including `bookingId`
+- payload is a list with one entry per player
+- each payload entry includes:
+  - `slotBookingId`
+  - `createdNumber` (1..N in booking order)
+  - `player` object with identity and booking flags
+  - `state`, `hasBeenValidated`, `isNineHole`, `hasArrived`
+
+### Search players
+
+- `GET /bokning/api/Persons`
+- query:
+  - `SearchPhrase` (typically golf id)
+  - `Country` (for example `Sweden`)
+- used to resolve extra players before final booking payload
 
 ### Cleanup on failure
 
@@ -143,6 +158,7 @@ Notable auth behavior:
 - `mingolf clubs` -> clubs endpoint
 - `mingolf courses --club` -> clubs/courses endpoint
 - `mingolf tee-times` -> course schedule endpoint
+- `mingolf players search` -> persons endpoint
 - `mingolf bookings create` -> lock/validate/tees/create sequence
 - `mingolf bookings list` -> home overview endpoint
 - `mingolf bookings cancel` -> cancel endpoint

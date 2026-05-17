@@ -42,6 +42,11 @@ Expected pattern:
 
 ```bash
 mingolf bookings create --slot 724854b6-b739-4886-b9e1-a545103763a1
+mingolf players search --search 840225-034 --country Sweden
+mingolf bookings create \
+  --slot 724854b6-b739-4886-b9e1-a545103763a1 \
+  --companion-golf-id 840225-034 \
+  --country Sweden
 mingolf bookings list
 mingolf bookings cancel --booking dbd9f886-0ec9-4434-bc3f-3968bd371970
 ```
