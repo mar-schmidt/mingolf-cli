@@ -8,7 +8,11 @@ from typing import Any
 import typer
 
 from mingolf_cli import exit_codes
-from mingolf_cli.client.auth import ensure_authenticated, save_auth_state
+from mingolf_cli.client.auth import (
+    ensure_authenticated,
+    request_with_reauth,
+    save_auth_state,
+)
 from mingolf_cli.client.booking import (
     BookingPlayer,
     cancel_booking as cancel_booking_api,
@@ -191,7 +195,13 @@ def bookings_list(ctx: typer.Context) -> None:
     def action() -> dict[str, Any]:
         runtime = get_runtime(ctx)
         ensure_authenticated(runtime.client, runtime.paths)
-        home = runtime.client.request_json(
+        # /start/api/* has been observed to intermittently 401 even right
+        # after ensure_authenticated confirms the session against
+        # /login/api/profile (likely a different backend/session store).
+        # Self-heal with a forced re-login + single retry instead of dying.
+        home = request_with_reauth(
+            runtime.client,
+            runtime.paths,
             "GET",
             "/start/api/Persons/HomeOverview",
         )

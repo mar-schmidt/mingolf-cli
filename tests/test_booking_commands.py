@@ -6,7 +6,9 @@ from typing import Any
 
 from typer.testing import CliRunner
 
+from mingolf_cli import exit_codes
 from mingolf_cli.client.auth import AuthState
+from mingolf_cli.errors import CliError
 from mingolf_cli.main import app
 
 runner = CliRunner()
@@ -253,6 +255,72 @@ def test_bookings_create_fails_when_companion_missing(
     assert result.exit_code == 1
     error = json.loads(result.output)
     assert error["code"] == "player_not_found"
+
+
+def test_bookings_list_maps_future_rounds(monkeypatch, tmp_path) -> None:
+    _prepare(monkeypatch, tmp_path)
+    calls: list[tuple[str, str]] = []
+
+    def fake_request_with_reauth(_client, _paths, method, path, **_kwargs):
+        calls.append((method, path))
+        return {
+            "golfCalender": {
+                "futureRounds": [{"bookingId": "b1"}, {"bookingId": "b2"}]
+            }
+        }
+
+    monkeypatch.setattr(
+        "mingolf_cli.commands.booking.request_with_reauth",
+        fake_request_with_reauth,
+    )
+
+    result = runner.invoke(app, ["bookings", "list"])
+    assert result.exit_code == 0
+    output = json.loads(result.stdout)
+    assert output["ok"] is True
+    assert output["count"] == 2
+    assert calls == [("GET", "/start/api/Persons/HomeOverview")]
+
+
+def test_bookings_list_uses_reauth_wrapper_not_raw_request(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Regression guard for the intermittent-401 bug: `ensure_authenticated`
+    only validates `/login/api/profile`, which can pass while `/start/api/*`
+    still momentarily 401s (different backend/session store). `bookings_list`
+    must route that call through `request_with_reauth` -- which force-relogs
+    and retries once on `auth_required` -- rather than calling
+    `client.request_json` directly, which has no such recovery and would
+    just die (as seen repeatedly in the HA family-calendar-sync job).
+    """
+    _prepare(monkeypatch, tmp_path)
+
+    def fail_if_called_directly(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError(
+            "bookings_list must not call client.request_json directly for "
+            "/start/api/*; use request_with_reauth instead"
+        )
+
+    monkeypatch.setattr(
+        "mingolf_cli.client.http.MingolfHttpClient.request_json",
+        fail_if_called_directly,
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_request_with_reauth(_client, _paths, method, path, **_kwargs):
+        calls.append((method, path))
+        return {"golfCalender": {"futureRounds": []}}
+
+    monkeypatch.setattr(
+        "mingolf_cli.commands.booking.request_with_reauth",
+        fake_request_with_reauth,
+    )
+
+    result = runner.invoke(app, ["bookings", "list"])
+    assert result.exit_code == 0
+    assert calls == [("GET", "/start/api/Persons/HomeOverview")]
 
 
 def test_players_search_command(monkeypatch, tmp_path) -> None:

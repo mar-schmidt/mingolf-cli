@@ -141,28 +141,25 @@ def login_with_credentials(
     return profile
 
 
-def ensure_authenticated(
+def _relogin(
     client: MingolfHttpClient,
     paths: AppPaths,
+    state: AuthState,
     *,
     require_tty_prompt: bool = False,
-) -> tuple[AuthState, dict[str, Any]]:
-    """Ensure a valid session, re-login from stored credentials if needed."""
-    state = load_auth_state(paths)
+    checked_path: str = "/login/api/profile",
+) -> dict[str, Any]:
+    """Force a fresh login from stored credentials and persist the result.
 
-    try:
-        profile = client.request_json("GET", "/login/api/profile")
-        return state, profile
-    except CliError as exc:
-        if exc.exit_code != exit_codes.AUTH:
-            raise
-
+    Unlike `ensure_authenticated`, this performs no cheap pre-check first —
+    callers use it when they already know the cached session is stale.
+    """
     if require_tty_prompt:
         raise CliError(
             error="Login required",
             code="login_required",
             exit_code=exit_codes.AUTH,
-            details={"path": "/login/api/profile"},
+            details={"path": checked_path},
         )
 
     if not state.golf_id:
@@ -189,4 +186,69 @@ def ensure_authenticated(
     )
     state.cookies = client.cookies_dict()
     save_auth_state(paths, state)
+    return profile
+
+
+def ensure_authenticated(
+    client: MingolfHttpClient,
+    paths: AppPaths,
+    *,
+    require_tty_prompt: bool = False,
+) -> tuple[AuthState, dict[str, Any]]:
+    """Ensure a valid session, re-login from stored credentials if needed.
+
+    Note: this only proves the session is valid against `/login/api/profile`.
+    Some endpoints (e.g. `/start/api/*`) appear to be backed by a session
+    store that doesn't always agree with `/login/api/profile` at the same
+    instant, so passing this check is not a guarantee that every endpoint
+    will accept the session too. Callers hitting those endpoints should use
+    `request_with_reauth` to self-heal on a stray 401/403 instead of trusting
+    this check alone.
+    """
+    state = load_auth_state(paths)
+
+    try:
+        profile = client.request_json("GET", "/login/api/profile")
+        return state, profile
+    except CliError as exc:
+        if exc.exit_code != exit_codes.AUTH:
+            raise
+
+    profile = _relogin(client, paths, state, require_tty_prompt=require_tty_prompt)
     return state, profile
+
+
+def reauthenticate(client: MingolfHttpClient, paths: AppPaths) -> AuthState:
+    """Force a fresh login, bypassing the cached-session check entirely.
+
+    Used by `request_with_reauth` when an endpoint reports auth_required
+    despite `ensure_authenticated` having just passed, so the cached session
+    must be treated as stale rather than trusted.
+    """
+    state = load_auth_state(paths)
+    _relogin(state=state, client=client, paths=paths)
+    return state
+
+
+def request_with_reauth(
+    client: MingolfHttpClient,
+    paths: AppPaths,
+    method: str,
+    path: str,
+    **kwargs: Any,
+) -> Any:
+    """Call `client.request_json`, self-healing a stray auth_required.
+
+    Some endpoints (observed on `/start/api/*`) can 401 even immediately
+    after `ensure_authenticated` confirmed the session against
+    `/login/api/profile` — the two appear to be backed by different session
+    stores that don't always agree at the same instant. Rather than let that
+    kill the whole command, force a fresh login and retry the request once.
+    """
+    try:
+        return client.request_json(method, path, **kwargs)
+    except CliError as exc:
+        if exc.code != "auth_required":
+            raise
+        reauthenticate(client, paths)
+        return client.request_json(method, path, **kwargs)
