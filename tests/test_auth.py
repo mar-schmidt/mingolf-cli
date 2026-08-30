@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from mingolf_cli import exit_codes
+from mingolf_cli.client import auth as auth_module
 from mingolf_cli.client.auth import (
     AuthState,
     load_auth_state,
@@ -138,17 +139,19 @@ def test_request_with_reauth_does_not_swallow_non_auth_errors(
     assert client.calls == [("GET", "/start/api/x")]
 
 
-def test_request_with_reauth_propagates_second_failure(tmp_path, monkeypatch) -> None:
-    """If the endpoint still 401s after a forced re-login, surface the error
-    instead of retrying forever."""
+def test_request_with_reauth_propagates_failure_after_all_retries(
+    tmp_path, monkeypatch
+) -> None:
+    """If the endpoint still 401s after every forced re-login, surface the
+    error instead of retrying forever.
+
+    One initial call plus one attempt per entry in _REAUTH_BACKOFF_SECONDS.
+    """
     paths = _paths(tmp_path)
     _seed_state(paths)
-    client = _FakeClient(
-        [
-            _auth_required("/start/api/x"),
-            _auth_required("/start/api/x"),
-        ]
-    )
+    attempts = 1 + len(auth_module._REAUTH_BACKOFF_SECONDS)
+    client = _FakeClient([_auth_required("/start/api/x") for _ in range(attempts)])
+    monkeypatch.setattr("mingolf_cli.client.auth.time.sleep", lambda _s: None)
     monkeypatch.setattr(
         "mingolf_cli.client.auth.load_password",
         lambda: "hunter2",
@@ -161,7 +164,41 @@ def test_request_with_reauth_propagates_second_failure(tmp_path, monkeypatch) ->
     with pytest.raises(CliError) as excinfo:
         request_with_reauth(client, paths, "GET", "/start/api/x")
     assert excinfo.value.code == "auth_required"
-    assert len(client.calls) == 2
+    assert len(client.calls) == attempts
+
+
+def test_request_with_reauth_self_heals_on_later_retry(tmp_path, monkeypatch) -> None:
+    """The 2026-08-27/28/29 failure: the forced re-login AND its first retry
+    both 401, and only a later, spaced attempt succeeds. Before the backoff
+    fix this exited auth_required and the caller lost the data — on 08-29 that
+    would have silently dropped a real tee-time booking from the sync.
+    """
+    paths = _paths(tmp_path)
+    _seed_state(paths)
+    client = _FakeClient(
+        [
+            _auth_required("/start/api/Persons/HomeOverview"),
+            _auth_required("/start/api/Persons/HomeOverview"),
+            {"ok": True, "futureRounds": [], "count": 0},
+        ]
+    )
+    slept: list[float] = []
+    monkeypatch.setattr(
+        "mingolf_cli.client.auth.time.sleep", lambda s: slept.append(s)
+    )
+    monkeypatch.setattr("mingolf_cli.client.auth.load_password", lambda: "hunter2")
+    monkeypatch.setattr(
+        "mingolf_cli.client.auth.login_with_credentials",
+        lambda _client, *, golf_id, password: {"personId": "p1"},
+    )
+
+    result = request_with_reauth(
+        client, paths, "GET", "/start/api/Persons/HomeOverview"
+    )
+    assert result == {"ok": True, "futureRounds": [], "count": 0}
+    assert len(client.calls) == 3
+    # The recovering attempt was spaced, not fired back-to-back.
+    assert slept == [auth_module._REAUTH_BACKOFF_SECONDS[1]]
 
 
 def test_reauthenticate_requires_stored_golf_id(tmp_path) -> None:

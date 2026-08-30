@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,11 @@ from mingolf_cli.client.http import MingolfHttpClient
 
 KEYRING_SERVICE = "mingolf-cli"
 KEYRING_USERNAME = "credentials"
+
+# Delay before each forced-relogin retry in `request_with_reauth`. The first
+# retry stays immediate to preserve the original fast path; the later ones are
+# spaced to let a freshly minted session propagate to the `/start/api/*` store.
+_REAUTH_BACKOFF_SECONDS = (0.0, 1.5, 3.0)
 
 
 @dataclass(slots=True)
@@ -243,12 +249,32 @@ def request_with_reauth(
     after `ensure_authenticated` confirmed the session against
     `/login/api/profile` — the two appear to be backed by different session
     stores that don't always agree at the same instant. Rather than let that
-    kill the whole command, force a fresh login and retry the request once.
+    kill the whole command, force a fresh login and retry.
+
+    A single immediate retry is not always enough: it was observed to fail on
+    three consecutive days (2026-08-27, 08-28, 08-29), each time succeeding
+    when the same command was re-run manually seconds later. That timing is
+    consistent with the new session needing a moment to propagate to the
+    `/start/api/*` store, so the retries are spaced by `_REAUTH_BACKOFF_SECONDS`
+    rather than fired back-to-back. The original error is re-raised if every
+    attempt is exhausted.
     """
     try:
         return client.request_json(method, path, **kwargs)
     except CliError as exc:
         if exc.code != "auth_required":
             raise
-        reauthenticate(client, paths)
-        return client.request_json(method, path, **kwargs)
+        last_error = exc
+
+    for delay in _REAUTH_BACKOFF_SECONDS:
+        if delay:
+            time.sleep(delay)
+        try:
+            reauthenticate(client, paths)
+            return client.request_json(method, path, **kwargs)
+        except CliError as exc:
+            if exc.code != "auth_required":
+                raise
+            last_error = exc
+
+    raise last_error
